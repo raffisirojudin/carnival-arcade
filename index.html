@@ -150,7 +150,39 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9001;
 .btn-g{background:var(--cg);color:var(--ink);}
 .btn-b{background:var(--cb);color:var(--cream);}
 
-/* ── SWIPE HINT (mobile only) ── */
+/* ── ON-SCREEN KEYBOARD (Typing Rush) ── */
+#mobileKeyboard{
+  display:none;
+  position:absolute;bottom:0;left:0;right:0;
+  background:rgba(13,27,42,.97);
+  padding:6px 4px 8px;
+  z-index:250;
+  flex-direction:column;
+  gap:4px;
+  border-top:2px solid rgba(0,180,204,.3);
+}
+#mobileKeyboard.show{display:flex;}
+.kb-row{display:flex;justify-content:center;gap:3px;}
+.kb-key{
+  font-family:'Fredoka One',cursive;
+  font-size:clamp(13px,3.5vw,18px);
+  background:rgba(255,245,225,.1);
+  color:#FFF5E1;
+  border:1.5px solid rgba(255,245,225,.2);
+  padding:0;
+  width:clamp(28px,8.5vw,42px);
+  height:clamp(32px,9vw,46px);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;user-select:none;-webkit-user-select:none;
+  touch-action:none;border-radius:4px;
+  transition:background .08s;
+  flex-shrink:0;
+}
+.kb-key:active,.kb-key.kb-hit{
+  background:rgba(0,180,204,.5);
+  border-color:var(--ct);
+  transform:scale(.93);
+}
 #swipeHint{
   position:absolute;bottom:120px;left:50%;transform:translateX(-50%);
   background:rgba(26,16,8,.75);color:var(--cream);font-family:'Fredoka One',cursive;
@@ -221,6 +253,13 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9001;
     </div>
   </div>
   <div id="swipeHint">👆 Swipe to move · Tap to action</div>
+
+  <!-- On-screen keyboard for Typing Rush mobile -->
+  <div id="mobileKeyboard">
+    <div class="kb-row" id="kbRow1"></div>
+    <div class="kb-row" id="kbRow2"></div>
+    <div class="kb-row" id="kbRow3"></div>
+  </div>
 
   <div id="death">
     <div class="d-banner"><div class="d-title" id="dTitle">GAME OVER!</div></div>
@@ -1286,21 +1325,56 @@ const CA=(()=>{
   function resize(){
     if(!document.getElementById('gameWrap').classList.contains('on'))return;
     const hasVCtrl=IS_MOBILE&&vCtrlEl.classList.contains('show');
+    const hasKb=document.getElementById('mobileKeyboard').classList.contains('show');
     const hudH=document.getElementById('g-hud').offsetHeight;
     const ctrlH=document.getElementById('g-ctrl').offsetHeight;
     const vCtrlH=hasVCtrl?vCtrlEl.offsetHeight:0;
+    const kbH=hasKb?document.getElementById('mobileKeyboard').offsetHeight:0;
     W=window.innerWidth;
-    H=window.innerHeight-hudH-ctrlH-vCtrlH;
-    canvas.width=W;canvas.height=Math.max(H,200);
+    H=window.innerHeight-hudH-ctrlH-vCtrlH-kbH;
+    canvas.width=W;canvas.height=Math.max(H,160);
     H=canvas.height;
   }
 
+  // Build on-screen QWERTY keyboard for Typing Rush
+  const KB_ROWS=['QWERTYUIOP','ASDFGHJKL','ZXCVBNM'];
+  function _buildKeyboard(){
+    KB_ROWS.forEach((row,i)=>{
+      const el=document.getElementById(`kbRow${i+1}`);
+      el.innerHTML='';
+      for(const ch of row){
+        const btn=document.createElement('div');
+        btn.className='kb-key';
+        btn.textContent=ch;
+        btn.dataset.ch=ch;
+        // Touch: press highlights key and fires letter
+        btn.addEventListener('touchstart',e=>{
+          e.preventDefault();
+          btn.classList.add('kb-hit');
+          if(game&&running) game.keyPress?.(ch);
+          setTimeout(()=>btn.classList.remove('kb-hit'),120);
+        },{passive:false});
+        btn.addEventListener('mousedown',e=>{
+          btn.classList.add('kb-hit');
+          if(game&&running) game.keyPress?.(ch);
+          setTimeout(()=>btn.classList.remove('kb-hit'),120);
+        });
+        el.appendChild(btn);
+      }
+    });
+  }
+
+  function _hideKeyboard(){
+    document.getElementById('mobileKeyboard').classList.remove('show');
+  }
+
   function setupVCtrl(vCtrlType){
-    // Hide all virtual buttons first
+    // Reset all controls first
+    _hideKeyboard();
     dpUp.style.display='';dpDown.style.display='';dpLeft.style.display='';dpRight.style.display='';
     document.getElementById('dpad').style.visibility='visible';
 
-    if(!IS_MOBILE){vCtrlEl.classList.remove('show');return;}
+    if(!IS_MOBILE){vCtrlEl.classList.remove('show');_hideKeyboard();return;}
 
     if(vCtrlType==='tap'||vCtrlType==='touch'){
       // Only show action button, hide dpad
@@ -1317,44 +1391,71 @@ const CA=(()=>{
       vCtrlEl.classList.add('show');
       aBtn.style.display='';
     } else if(vCtrlType==='letters'){
-      document.getElementById('dpad').style.visibility='hidden';
-      aBtn.textContent='NONE'; aBtn.style.display='none';
-      vCtrlEl.classList.add('show');
-      aBtn.style.display='';
+      // Hide dpad/action, show on-screen QWERTY keyboard instead
+      vCtrlEl.classList.remove('show');
+      document.getElementById('mobileKeyboard').classList.add('show');
+      _buildKeyboard();
     } else {
       vCtrlEl.classList.remove('show');
     }
   }
 
-  // D-pad touch handling
-  function holdBtn(key, keyUp){
-    return {
-      start(e){e.preventDefault();if(game&&running)game.input?.(key);},
-      end(e){e.preventDefault();if(game&&running&&keyUp)game.input?.(keyUp);}
-    };
+  // D-pad hold mechanic — track which keys are held, fire every frame in game loop
+  const heldKeys={};
+  function setHeld(key,val){
+    heldKeys[key]=val;
+    if(game&&running){
+      if(val) game.input?.(key);
+      else if(key==='left') game.input?.('leftUp');
+      else if(key==='right') game.input?.('rightUp');
+      else if(key==='up') game.input?.('upUp');
+      else if(key==='down') game.input?.('downUp');
+      else if(key==='a') game.input?.('aUp');
+      else if(key==='d') game.input?.('dUp');
+    }
   }
+
+  // Continuously re-send held direction every 16ms so game sees it as "still held"
+  setInterval(()=>{
+    if(!game||!running) return;
+    for(const [k,v] of Object.entries(heldKeys)){
+      if(v) game.input?.(k);
+    }
+  },16);
+
   function btnEvents(el, key, keyUp){
-    el.addEventListener('touchstart',e=>{e.preventDefault();el.classList.add('pressed');if(game&&running)game.input?.(key);},{passive:false});
-    el.addEventListener('touchend',e=>{e.preventDefault();el.classList.remove('pressed');if(game&&running&&keyUp)game.input?.(keyUp);},{passive:false});
-    el.addEventListener('mousedown',e=>{el.classList.add('pressed');if(game&&running)game.input?.(key);});
-    el.addEventListener('mouseup',e=>{el.classList.remove('pressed');if(game&&running&&keyUp)game.input?.(keyUp);});
+    const press=e=>{e.preventDefault();el.classList.add('pressed');setHeld(key,true);};
+    const release=e=>{e.preventDefault();el.classList.remove('pressed');setHeld(key,false);};
+    el.addEventListener('touchstart',press,{passive:false});
+    el.addEventListener('touchend',release,{passive:false});
+    el.addEventListener('touchcancel',release,{passive:false});
+    el.addEventListener('mousedown',press);
+    el.addEventListener('mouseup',release);
+    el.addEventListener('mouseleave',release);
   }
   btnEvents(dpUp,'up','upUp');
   btnEvents(dpDown,'down','downUp');
   btnEvents(dpLeft,'left','leftUp');
   btnEvents(dpRight,'right','rightUp');
-  btnEvents(aBtn,'action',null);
+  // Action button — single trigger, not hold
+  aBtn.addEventListener('touchstart',e=>{e.preventDefault();aBtn.classList.add('pressed');if(game&&running)game.input?.('action');},{passive:false});
+  aBtn.addEventListener('touchend',e=>{e.preventDefault();aBtn.classList.remove('pressed');},{passive:false});
+  aBtn.addEventListener('mousedown',e=>{aBtn.classList.add('pressed');if(game&&running)game.input?.('action');});
+  aBtn.addEventListener('mouseup',e=>{aBtn.classList.remove('pressed');});
 
   // swipe detection on canvas
   let swipeStart=null;
+  // Games that use dpad — canvas tap should NOT trigger action (avoid conflict)
+  const DPAD_GAMES=['snake','clown','coin','gravity'];
   canvas.addEventListener('touchstart',e=>{
     e.preventDefault();if(!game||!running)return;
     const r=canvas.getBoundingClientRect(),t=e.touches[0];
     const mx=t.clientX-r.left,my=t.clientY-r.top;
     swipeStart={x:mx,y:my,t:Date.now()};
-    game.click?.(mx,my);game.input?.('action');game.mm?.(mx,my);
-    // resume audio context
-    SFX.play && (()=>{})();
+    game.click?.(mx,my);
+    game.mm?.(mx,my);
+    // Only trigger action from canvas tap for non-dpad games
+    if(!DPAD_GAMES.includes(gkey)) game.input?.('action');
   },{passive:false});
   canvas.addEventListener('touchmove',e=>{
     e.preventDefault();if(!game||!running)return;
@@ -1462,7 +1563,7 @@ const CA=(()=>{
   }
 
   function menu(){
-    running=false;game=null;vCtrlEl.classList.remove('show');
+    running=false;game=null;vCtrlEl.classList.remove('show');_hideKeyboard();
     document.getElementById('gameWrap').classList.remove('on');
     document.getElementById('death').classList.remove('on');
     document.getElementById('menuWrap').style.display='';
