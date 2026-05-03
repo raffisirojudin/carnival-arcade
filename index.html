@@ -52,6 +52,24 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9001;
   width:100%;max-width:860px;flex-shrink:0;}
 @media(max-width:640px){.m-grid{grid-template-columns:repeat(3,1fr);gap:7px;}}
 @media(max-width:400px){.m-grid{grid-template-columns:repeat(2,1fr);gap:6px;}}
+
+/* Category section headers */
+.m-cat{
+  width:100%;max-width:860px;flex-shrink:0;
+  display:flex;align-items:center;gap:10px;
+}
+.m-cat-label{
+  font-family:'Permanent Marker',cursive;
+  font-size:clamp(13px,3.5vw,18px);
+  white-space:nowrap;
+  padding:4px 14px;
+  border:3px solid var(--ink);
+  box-shadow:3px 3px 0 var(--ink);
+}
+.m-cat-line{flex:1;height:3px;background:var(--ink);}
+.m-cat.mobile .m-cat-label{background:var(--cg);color:var(--ink);}
+.m-cat.pc .m-cat-label{background:var(--ink);color:var(--cy);}
+.m-cat.pc .m-cat-line{background:var(--ink);}
 .m-tile{background:var(--paper);border:3px solid var(--ink);box-shadow:4px 4px 0 var(--ink);
   padding:10px 6px 8px;cursor:pointer;text-align:center;position:relative;overflow:hidden;
   transition:transform .1s,box-shadow .1s;user-select:none;-webkit-user-select:none;}
@@ -63,6 +81,9 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9001;
 .m-tile-best{font-size:9px;color:rgba(26,16,8,.4);display:block;margin-top:2px;}
 .m-tile-badge{position:absolute;top:-3px;right:-3px;background:var(--cr);color:var(--cy);
   font-family:'Fredoka One',cursive;font-size:7px;padding:2px 4px;border:2px solid var(--ink);}
+.m-tile.pc-only{opacity:.45;cursor:not-allowed;}
+.m-tile.pc-only:hover{transform:none;box-shadow:4px 4px 0 var(--ink);}
+.m-tile.pc-only:active{transform:none;box-shadow:4px 4px 0 var(--ink);}
 
 /* ── SOUND TOGGLE ── */
 #soundBtn{
@@ -216,7 +237,21 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9001;
     <div class="m-rep-items" id="repItems"></div>
     <div><div class="m-rep-label">TOTAL</div><div class="m-rep-val" id="repTotal">0</div></div>
   </div>
+  <!-- Mobile & Touch category -->
+  <div class="m-cat mobile">
+    <div class="m-cat-line"></div>
+    <div class="m-cat-label">📱 MOBILE &amp; PC</div>
+    <div class="m-cat-line"></div>
+  </div>
   <div class="m-grid" id="mgrid"></div>
+
+  <!-- PC Only category -->
+  <div class="m-cat pc">
+    <div class="m-cat-line"></div>
+    <div class="m-cat-label">🖥️ PC ONLY</div>
+    <div class="m-cat-line"></div>
+  </div>
+  <div class="m-grid" id="mgrid-pc"></div>
 </div>
 
 <!-- GAME -->
@@ -1295,14 +1330,14 @@ const DEFS=[
   {key:'snake',  name:'Ribbon Snake', icon:'🎀',col:C.cp,cls:RibbonSnake,badge:null},
   {key:'stack',  name:'Stack Master', icon:'🎪',col:C.cb,cls:StackMaster,badge:null},
   {key:'frog',   name:'Frog Jump',    icon:'🐸',col:C.cg,cls:FrogJump,  badge:'NEW'},
-  {key:'clown',  name:'Dodge Clown',  icon:'🤡',col:C.co,cls:DodgeClown, badge:'HOT'},
+  {key:'clown',  name:'Dodge Clown',  icon:'🤡',col:C.co,cls:DodgeClown, pcOnly:true},
   {key:'candy',  name:'Candy Flap',   icon:'🍭',col:C.cg,cls:CandyFlap,  badge:null},
   {key:'whack',  name:'Whack-a-Mole', icon:'🦔',col:C.cy,cls:WhackMole,  badge:'30s'},
   {key:'pong',   name:'Pong Solo',    icon:'🏓',col:C.cb,cls:PongSolo,   badge:null},
-  {key:'coin',   name:'Coin Rain',    icon:'💰',col:C.cy,cls:CoinRain,   badge:null},
+  {key:'coin',   name:'Coin Rain',    icon:'💰',col:C.cy,cls:CoinRain,   pcOnly:true},
   {key:'memory', name:'Memory Flash', icon:'🃏',col:C.cv,cls:MemoryFlash,badge:null},
   {key:'gravity',name:'Gravity Ball', icon:'⚽',col:C.cg,cls:GravityBall,badge:'TILT'},
-  {key:'typing', name:'Typing Rush',  icon:'⌨️', col:C.ct,cls:TypingRush, badge:null},
+  {key:'typing', name:'Typing Rush',  icon:'⌨️', col:C.ct,cls:TypingRush, pcOnly:true},
 ];
 
 // ═══════════════════════════════════════
@@ -1507,17 +1542,31 @@ const CA=(()=>{
   window.addEventListener('resize',()=>{resize();if(game){game.W=W;game.H=H;}});
 
   function buildMenu(){
-    const grid=document.getElementById('mgrid');grid.innerHTML='';
-    for(const d of DEFS){
-      const el=document.createElement('div');el.className='m-tile';
-      el.innerHTML=`<div class="m-tile-sw" style="background:${d.col}"></div>
-        ${d.badge?`<div class="m-tile-badge">${d.badge}</div>`:''}
+    const grid=document.getElementById('mgrid');
+    const gridPC=document.getElementById('mgrid-pc');
+    grid.innerHTML='';gridPC.innerHTML='';
+
+    function makeTile(d,blocked){
+      const el=document.createElement('div');
+      el.className='m-tile'+(blocked?' pc-only':'');
+      el.innerHTML=`
+        <div class="m-tile-sw" style="background:${d.col}"></div>
         <span class="m-tile-icon">${d.icon}</span>
         <span class="m-tile-name">${d.name}</span>
         <span class="m-tile-best">BEST: ${SC.get(d.key)}</span>`;
-      el.onclick=()=>{SFX.play('menu');start(d.key);};
-      grid.appendChild(el);
+      if(!blocked) el.onclick=()=>{SFX.play('menu');start(d.key);};
+      return el;
     }
+
+    for(const d of DEFS){
+      if(d.pcOnly){
+        // PC-only section: on mobile, show grayed out; on desktop clickable
+        gridPC.appendChild(makeTile(d, IS_MOBILE));
+      } else {
+        grid.appendChild(makeTile(d, false));
+      }
+    }
+
     document.getElementById('repItems').innerHTML=DEFS.map(d=>`<div class="m-ri">${d.icon}<b>${SC.get(d.key)}</b></div>`).join('');
     document.getElementById('repTotal').textContent=SC.total();
   }
